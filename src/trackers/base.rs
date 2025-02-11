@@ -13,28 +13,30 @@ impl BaseTracker {
         BaseTracker {}
     }
 
-    #[args(boxes, return_all = "false")]
-    #[pyo3(name = "update", text_signature = "(boxes, return_all = False)")]
+    #[args(boxes, return_all = "false", return_indices = "false")]
+    #[pyo3(name = "update", text_signature = "(boxes, return_all = False, return_indices = False)")]
     fn py_update<'py>(
         &mut self,
         _py: Python<'py>,
         _boxes: &'py PyAny,
         _return_all: bool,
+        _return_indices: bool,
     ) -> PyResult<&'py PyArray2<f32>> {
         Err(PyNotImplementedError::new_err(
             "Abstract method cannot be called!",
         ))
     }
 
-    #[args(return_all = "false")]
+    #[args(return_all = "false", return_indices = "false")]
     #[pyo3(
         name = "get_current_track_boxes",
-        text_signature = "(return_all = False)"
+        text_signature = "(return_all = False, return_indices = False)"
     )]
     pub fn get_current_track_boxes<'py>(
         &self,
         _py: Python<'py>,
         _return_all: bool,
+        _return_indices: bool,
     ) -> PyResult<&'py PyArray2<f32>> {
         Err(PyNotImplementedError::new_err(
             "Abstract method cannot be called!",

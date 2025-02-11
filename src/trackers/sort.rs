@@ -14,8 +14,8 @@ use crate::bbox::{ious, Bbox};
 use crate::box_tracker::{KalmanBoxTracker, KalmanBoxTrackerParams};
 use crate::trackers::BaseTracker;
 
-type TrackidBoxes = Vec<(u32, Bbox<f32>)>;
-type ScoreBoxes = Vec<(f32, Bbox<f32>)>;
+type TrackidBoxes = Vec<(u32, Bbox<f32>, u32)>;
+type ScoreBoxes = Vec<(f32, Bbox<f32>, u32)>;
 
 /// Assign detection boxes to track boxes
 ///
@@ -51,12 +51,12 @@ fn assign_detections_to_tracks(
             Some(track_idx) => {
                 // we negated the ious, so negate again here
                 if -det_track_ious[(det_idx, track_idx)] > iou_threshold {
-                    match_updates.push((tracks[(track_idx, 4)] as u32, det_box))
+                    match_updates.push((tracks[(track_idx, 4)] as u32, det_box, det_idx as u32))
                 } else {
-                    unmatched_dets.push((score, det_box));
+                    unmatched_dets.push((score, det_box, det_idx as u32));
                 }
             }
-            None => unmatched_dets.push((score, det_box)),
+            None => unmatched_dets.push((score, det_box, det_idx as u32)),
         }
     }
 
@@ -129,7 +129,7 @@ impl Sort {
         Array2::from_shape_vec((self.tracklets.len(), 5), data).unwrap()
     }
 
-    pub fn get_tracklet_boxes(&self, return_all: bool) -> Array2<f32> {
+    pub fn get_tracklet_boxes(&self, return_all: bool, return_indices: bool) -> Array2<f32> {
         let mut data = Vec::new();
         for (_, tracklet) in self.tracklets.iter() {
             if return_all
@@ -138,22 +138,29 @@ impl Sort {
             {
                 data.extend(tracklet.bbox().to_bounds());
                 data.push(cast(tracklet.id).unwrap());
+                if return_indices {
+                    data.push(tracklet.det_idx as f32);
+                }
             }
         }
-        Array2::from_shape_vec((data.len() / 5, 5), data).unwrap()
+        let dim = if return_indices { 6 } else { 5 };
+        Array2::from_shape_vec((data.len() / dim, dim), data).unwrap()
     }
 
     pub fn create_tracklets(&mut self, score_boxes: ScoreBoxes) {
-        for (score, bbox) in score_boxes {
+        for (score, bbox, det_idx) in score_boxes {
             if score >= self.init_tracker_min_score {
                 self.tracklets.insert(
                     self.next_track_id,
-                    KalmanBoxTracker::new(KalmanBoxTrackerParams {
-                        id: self.next_track_id,
-                        bbox,
-                        meas_var: Some(self.measurement_noise),
-                        proc_var: Some(self.process_noise),
-                    }),
+                    KalmanBoxTracker::new(
+                        KalmanBoxTrackerParams {
+                            id: self.next_track_id,
+                            bbox,
+                            meas_var: Some(self.measurement_noise),
+                            proc_var: Some(self.process_noise),
+                        },
+                        det_idx,
+                    ),
                 );
                 self.next_track_id += 1
             }
@@ -168,8 +175,10 @@ impl Sort {
         let (matched_boxes, unmatched_detections) =
             assign_detections_to_tracks(detection_boxes, tracklet_boxes, self.iou_threshold)?;
 
-        for (track_id, bbox) in matched_boxes {
-            let update_result = self.tracklets.get_mut(&track_id).unwrap().update(bbox);
+        for (track_id, bbox, det_idx) in matched_boxes {
+            let tracklet = self.tracklets.get_mut(&track_id).unwrap();
+            tracklet.det_idx = det_idx;
+            let update_result = tracklet.update(bbox);
             if update_result.is_err() {
                 // Failed to invert S matrix, broken tracklet
                 self.tracklets.remove(&track_id);
@@ -187,6 +196,7 @@ impl Sort {
         &mut self,
         detection_boxes: CowArray<f32, Ix2>,
         return_all: bool,
+        return_indices: bool,
     ) -> anyhow::Result<Array2<f32>> {
         let tracklet_boxes = self.predict_and_cleanup();
         let unmatched_detections =
@@ -197,7 +207,7 @@ impl Sort {
         self.create_tracklets(unmatched_detections);
 
         self.n_steps += 1;
-        Ok(self.get_tracklet_boxes(return_all))
+        Ok(self.get_tracklet_boxes(return_all, return_indices))
     }
 }
 
@@ -247,18 +257,24 @@ impl Sort {
     ///     if true return all living trackers, including inactive (but not dead) ones
     ///     otherwise return only active trackers (those that got at least min_hits
     ///     matching boxes in a row)
+    /// return_indices
+    ///     if true return the indices of the boxes kept from the initial ones as the 6th dimension
     ///
     /// Returns
     /// -------
-    ///    array of tracklet boxes with shape (n_tracks, 5)
+    ///    array of tracklet boxes with shape (n_tracks, 5) or (n_tracks, 6) if return_indices is true
     ///    of the form [[xmin1, ymin1, xmax1, ymax1, track_id1], [xmin2,...],...]
-    #[args(boxes, return_all = "false")]
-    #[pyo3(name = "update", text_signature = "(boxes, return_all = False)")]
+    #[args(boxes, return_all = "false", return_indices = "false")]
+    #[pyo3(
+        name = "update",
+        text_signature = "(boxes, return_all = False, return_indices = False)"
+    )]
     fn py_update<'py>(
         &mut self,
         _py: Python<'py>,
         boxes: &'py PyAny,
         return_all: bool,
+        return_indices: bool,
     ) -> PyResult<&'py PyArray2<f32>> {
         // We allow 'boxes' to be either f32 (then we use it directly) or f64 (then we convert to f32)
         // TODO: find some way to extract this into a function...
@@ -278,7 +294,9 @@ impl Sort {
             ));
         }
 
-        return Ok(self.update(detection_boxes, return_all)?.into_pyarray(_py));
+        return Ok(self
+            .update(detection_boxes, return_all, return_indices)?
+            .into_pyarray(_py));
     }
 
     /// Return current track boxes
@@ -289,22 +307,27 @@ impl Sort {
     ///     if true return all living trackers, including inactive (but not dead) ones
     ///     otherwise return only active trackers (those that got at least min_hits
     ///     matching boxes in a row)
+    /// return_indices
+    ///     if true return the indices of the boxes kept from the initial ones as the 6th dimension
+    ///
     ///
     /// Returns
     /// -------
     ///    array of tracklet boxes with shape (n_tracks, 5)
     ///    of the form [[xmin1, ymin1, xmax1, ymax1, track_id1], [xmin2,...],...]
-    #[args(return_all = "false")]
+    #[args(return_all = "false", return_indices = "false")]
     #[pyo3(
         name = "get_current_track_boxes",
-        text_signature = "(return_all = False)"
+        text_signature = "(return_all = False, return_indices = False)"
     )]
     pub fn get_current_track_boxes<'py>(
         &self,
         _py: Python<'py>,
         return_all: bool,
+        return_indices: bool,
     ) -> &'py PyArray2<f32> {
-        self.get_tracklet_boxes(return_all).into_pyarray(_py)
+        self.get_tracklet_boxes(return_all, return_indices)
+            .into_pyarray(_py)
     }
 
     /// Remove all current tracklets
@@ -341,6 +364,7 @@ mod tests {
             tracker
                 .update(
                     array![[0.0, 1.5, 12.6, 25.0, 0.9], [-5.5, 18.0, 1.0, 20.0, 0.15]].into(),
+                    false,
                     false
                 )
                 .unwrap(),
@@ -367,6 +391,7 @@ mod tests {
                     [-5.5, 18.0, 1.0, 20.0, 0.15]
                 ]
                 .into(),
+                false,
                 false,
             )
             .unwrap();

@@ -10,6 +10,7 @@ pub struct KalmanBoxTracker {
     /// track id
     #[pyo3(get)]
     pub id: u32,
+    pub det_idx: u32,
     /// Kalman filter tracking bbox state
     kf: KalmanFilter<f32>,
     /// number of steps tracker has been run for (each predict() is one step)
@@ -41,9 +42,10 @@ pub struct KalmanBoxTrackerParams {
 
 impl KalmanBoxTracker {
     /// Create new Kalman filter-based bbox tracker
-    pub fn new(p: KalmanBoxTrackerParams) -> Self {
+    pub fn new(p: KalmanBoxTrackerParams, det_idx: u32) -> Self {
         KalmanBoxTracker {
             id: p.id,
+            det_idx: det_idx,
             kf: KalmanFilter::new(KalmanFilterParams {
                 dim_x: 7, // center_x, center_y, area, aspect_ratio, vel_x, vel_y, vel_area
                 dim_z: 4, // center_x, center_y, area, aspect_ratio
@@ -118,17 +120,20 @@ mod tests {
 
     #[test]
     fn test_bbox_tracker() {
-        let mut tracker = KalmanBoxTracker::new(KalmanBoxTrackerParams {
-            id: 0,
-            bbox: Bbox {
-                xmin: 0.,
-                xmax: 10.,
-                ymin: 0.,
-                ymax: 5.,
+        let mut tracker = KalmanBoxTracker::new(
+            KalmanBoxTrackerParams {
+                id: 0,
+                bbox: Bbox {
+                    xmin: 0.,
+                    xmax: 10.,
+                    ymin: 0.,
+                    ymax: 5.,
+                },
+                meas_var: None,
+                proc_var: None,
             },
-            meas_var: None,
-            proc_var: None,
-        });
+            0,
+        );
         tracker.predict();
         tracker
             .update(Bbox {

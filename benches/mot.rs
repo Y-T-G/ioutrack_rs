@@ -16,7 +16,7 @@ fn run_sort_on_dets(dets: &Array2<f32>, frame_borders: &Array1<usize>) {
     let mut first_i: usize = 0;
     for &last_i in frame_borders.iter() {
         tracker
-            .update(dets.slice(s![first_i..last_i, ..]).into(), false)
+            .update(dets.slice(s![first_i..last_i, ..]).into(), false, false)
             .unwrap();
         first_i = last_i;
     }
@@ -48,7 +48,7 @@ fn run_bytetrack_on_dets(dets: &Array2<f32>, frame_borders: &Array1<usize>) {
     let mut first_i: usize = 0;
     for &last_i in frame_borders.iter() {
         tracker
-            .update(dets.slice(s![first_i..last_i, ..]).into(), false)
+            .update(dets.slice(s![first_i..last_i, ..]).into(), false, false)
             .unwrap();
         first_i = last_i;
     }

@@ -72,6 +72,7 @@ impl ByteTrack {
         &mut self,
         detection_boxes: CowArray<f32, Ix2>,
         return_all: bool,
+        return_indices: bool,
     ) -> anyhow::Result<Array2<f32>> {
         let tracklet_boxes = self.sort_tracker.predict_and_cleanup();
 
@@ -110,7 +111,9 @@ impl ByteTrack {
             .create_tracklets(unmatched_low_score_detections);
 
         self.sort_tracker.n_steps += 1;
-        Ok(self.sort_tracker.get_tracklet_boxes(return_all))
+        Ok(self
+            .sort_tracker
+            .get_tracklet_boxes(return_all, return_indices))
     }
 }
 
@@ -168,18 +171,24 @@ impl ByteTrack {
     ///     if true return all living trackers, including inactive (but not dead) ones
     ///     otherwise return only active trackers (those that got at least min_hits
     ///     matching boxes in a row)
+    /// return_indices
+    ///     if true return the indices of the boxes kept from the initial ones as the 6th dimension
     ///
     /// Returns
     /// -------
-    ///    array of tracklet boxes with shape (n_tracks, 5)
+    ///    array of tracklet boxes with shape (n_tracks, 5) or (n_tracks, 6) if return_indices is true
     ///    of the form [[xmin1, ymin1, xmax1, ymax1, track_id1], [xmin2,...],...]
-    #[args(boxes, return_all = "false")]
-    #[pyo3(name = "update", text_signature = "(boxes, return_all = False)")]
+    #[args(boxes, return_all = "false", return_indices = "false")]
+    #[pyo3(
+        name = "update",
+        text_signature = "(boxes, return_all = False, return_indices = False)"
+    )]
     fn py_update<'py>(
         &mut self,
         _py: Python<'py>,
         boxes: &'py PyAny,
         return_all: bool,
+        return_indices: bool,
     ) -> PyResult<&'py PyArray2<f32>> {
         // We allow 'boxes' to be either f32 (then we use it directly) or f64 (then we convert to f32)
         // TODO: find some way to extract this into a function...
@@ -199,7 +208,9 @@ impl ByteTrack {
             ));
         }
 
-        return Ok(self.update(detection_boxes, return_all)?.into_pyarray(_py));
+        return Ok(self
+            .update(detection_boxes, return_all, return_indices)?
+            .into_pyarray(_py));
     }
 
     /// Return current track boxes
@@ -210,23 +221,26 @@ impl ByteTrack {
     ///     if true return all living trackers, including inactive (but not dead) ones
     ///     otherwise return only active trackers (those that got at least min_hits
     ///     matching boxes in a row)
+    /// return_indices
+    ///     if true return the indices of the boxes kept from the initial ones as the 6th dimension
     ///
     /// Returns
     /// -------
     ///    array of tracklet boxes with shape (n_tracks, 5)
     ///    of the form [[xmin1, ymin1, xmax1, ymax1, track_id1], [xmin2,...],...]
-    #[args(return_all = "false")]
+    #[args(return_all = "false", return_indices = "false")]
     #[pyo3(
         name = "get_current_track_boxes",
-        text_signature = "(return_all = False)"
+        text_signature = "(return_all = False, return_indices = False)"
     )]
     pub fn get_current_track_boxes<'py>(
         &self,
         _py: Python<'py>,
         return_all: bool,
+        return_indices: bool,
     ) -> &'py PyArray2<f32> {
         self.sort_tracker
-            .get_tracklet_boxes(return_all)
+            .get_tracklet_boxes(return_all, return_indices)
             .into_pyarray(_py)
     }
 
@@ -281,5 +295,51 @@ impl ByteTrack {
     #[setter]
     fn set_init_tracker_min_score(&mut self, value: f32) {
         self.sort_tracker.init_tracker_min_score = value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn test_byetrack() {
+        let boxes = array![
+            [270.71, 1.6277, 374.85, 276.68, 0.85113],
+            [376.79, 13.419, 464.71, 250.11, 0.79943],
+            [198.16, 102.59, 243.19, 214.45, 0.71286],
+            [105.97, 81.568, 120.27, 112.56, 0.59725],
+            [184.77, 135.38, 209.81, 207.71, 0.5742],
+            [158.85, 146.87, 175.76, 197.3, 0.5734],
+            [444.9, 146.99, 485.94, 200.19, 0.52883],
+            [112.16, 146.05, 129.28, 198.07, 0.52617],
+            [128.5, 146.01, 146.11, 199.99, 0.51999],
+            [62.405, 145.66, 81.003, 198.7, 0.46859],
+            [92.517, 7.8918, 118.37, 63.64, 0.42798],
+            [44.87, 78.817, 59.608, 124.28, 0.27232],
+            [11.39, 48.35, 31.832, 106.23, 0.2623]
+        ];
+
+        let mut tracker = ByteTrack::new(
+            5,
+            2,
+            0.3,
+            0.25,
+            0.7,
+            0.1,
+            [1., 1., 10., 10.],
+            [1., 1., 1., 1., 0.01, 0.01, 0.0001],
+        )
+        .0;
+
+        let tracks = tracker.update(boxes.view().into(), false, true).unwrap();
+
+        println!("Tracks:");
+        println!("{:?}", tracks);
+
+        // Add assertions to verify the expected behavior
+        assert_eq!(tracks.shape()[0], 13); // Ensure the number of tracks is correct
+        assert_eq!(tracks.shape()[1], 6); // Ensure the shape of the tracks array is correct
     }
 }

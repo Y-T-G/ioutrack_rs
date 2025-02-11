@@ -1,11 +1,12 @@
 [build-system]
-requires = ["maturin>=0.12,<0.13"]
+requires = ["maturin>=1.8.2"]
 build-backend = "maturin"
 
 [project]
-name = "ioutrack"
+name = "ioutrack_rs"
 description = "IOU-based tracking algorithms (SORT & Bytetrack) implemented in Rust"
 authors = [
+    {name = "Mohammed Yasin"},
     {name = "Paul Klinger", email = "klinger.paul@gmail.com"}
 ]
 requires-python = ">=3.7"
