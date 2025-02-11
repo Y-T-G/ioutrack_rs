@@ -6,7 +6,7 @@ Python package for IOU-based tracking ([SORT](https://arxiv.org/abs/1602.00763) 
 
 ## Usage in Ultralytics
 
-1. Install `pip install ioutracker_rs`
+1. Install `pip install ioutrack_rs`
 2. Patch Ultralytics tracker to use:
 
 ```python
