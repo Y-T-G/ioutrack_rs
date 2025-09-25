@@ -17,7 +17,7 @@ import ultralytics.trackers.byte_tracker as byte_tracker
 
 # Monkey-patch with Rust based tracker
 tracker = ByteTrack(max_age=5, min_hits=2, init_tracker_min_score=0.25)
-def update(self, dets, img):
+def update(self, dets, *args, **kwargs):
     boxes, cls = dets.data[:,:5], dets.data[:, -1:]
     tracks = tracker.update(boxes, return_indices=True)
     idxs = tracks[:, -1:].astype(int)
@@ -41,7 +41,7 @@ from ioutrack import ByteTrack
 import ultralytics.trackers.byte_tracker as byte_tracker
 import numpy as np
 
-def update(self, dets, img):
+def update(self, dets, *args, **kwargs):
     global tracker
     boxes, cls = dets.data[:,:5], dets.data[:, -1:]
     tracks = tracker.update(boxes, return_indices=True)
